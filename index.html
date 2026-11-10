@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RARR viewer</title>
+<style>
+body{margin:0;background:#222;color:#eee;font:14px sans-serif}
+#bar{position:sticky;top:0;background:#111;padding:6px;display:flex;gap:8px;align-items:center;z-index:2}
+#wrap{overflow:auto;height:calc(100vh - 78px)}
+canvas{image-rendering:pixelated;display:block}
+#info{padding:4px 8px;height:20px;font-size:12px;color:#9f9}
+</style>
+<div id="bar"><select id="sel"></select><button id="z">x2</button><label><input type="checkbox" id="ev" checked>event</label></div>
+<div id="info">pilih map</div>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+const $=i=>document.getElementById(i),J=u=>fetch(u).then(r=>r.json());
+let S=2,db,idx,meta,cur,cs,imgs={};
+function img(k){return new Promise(r=>{if(imgs[k])return r(imgs[k]);const p=idx[k];if(!p)return r(null);
+ const i=new Image();i.onload=()=>r(imgs[k]=i);i.onerror=()=>r(null);i.src=p;});}
+// posisi tile di chipset (480x256). Tebakan awal, disesuaikan lewat screenshot.
+function pos(t,up){
+ if(up){if(t<10000)return null;const n=t-10000;if(n>=96)return null;return[384+(n%6)*16,(n/6|0)*16];}
+ if(t>=5000){const n=t-5000;if(n>=96)return null;return[288+(n%6)*16,(n/6|0)*16];}
+ return null;
+}
+function autoColor(t){
+ if(t<3000)return'#2a5caa';           // air A/B/C (sementara)
+ if(t<4000)return'#3b7d3b';           // autotile D (sementara)
+ return'#8a6a3a';                     // autotile E (sementara)
+}
+function draw(){
+ const m=cur,c=$('c'),g=c.getContext('2d');
+ c.width=m.w*16;c.height=m.h*16;c.style.width=m.w*16*S+'px';c.style.height=m.h*16*S+'px';
+ g.imageSmoothingEnabled=false;g.fillStyle='#000';g.fillRect(0,0,c.width,c.height);
+ const pan=m.use_parallax&&m.parallax?imgs['panorama/'+m.parallax.toLowerCase()]:null;
+ if(pan)g.drawImage(pan,0,0);
+ const ci=imgs.chip;
+ for(const up of[0,1]){
+  const L=up?m.upper:m.lower;
+  for(let y=0;y<m.h;y++)for(let x=0;x<m.w;x++){
+   const t=L[y*m.w+x];if(t==null)continue;
+   const p=pos(t,up);
+   if(p&&ci)g.drawImage(ci,p[0],p[1],16,16,x*16,y*16,16,16);
+   else if(!up&&t<5000){g.fillStyle=autoColor(t);g.fillRect(x*16,y*16,16,16);}
+  }
+ }
+ if($('ev').checked)for(const e of m.events){
+  const pg=e.pages[0];g.strokeStyle='#f0f';g.strokeRect(e.x*16+.5,e.y*16+.5,15,15);
+  const sp=pg&&pg.gfx?imgs['charset/'+pg.gfx.toLowerCase()]:null;
+  if(sp){const i=pg.idx,sx=(i%4)*72+pg.pat*24,sy=(i/4|0)*128+({8:0,6:1,2:2,4:3}[pg.dir]||2)*32;
+   g.drawImage(sp,sx,sy,24,32,e.x*16-4,e.y*16-16,24,32);}
+ }
+}
+async function load(id){
+ $('info').textContent='memuat map '+id+'...';
+ cur=await J('data/maps/'+String(id).padStart(4,'0')+'.json');
+ cs=db.chipsets[cur.chipset];
+ imgs.chip=cs?await img('chipset/'+cs.file.toLowerCase()):null;
+ if(cur.parallax)await img('panorama/'+cur.parallax.toLowerCase());
+ const names=new Set(cur.events.map(e=>e.pages[0]&&e.pages[0].gfx).filter(Boolean));
+ for(const n of names)await img('charset/'+n.toLowerCase());
+ draw();
+ $('info').textContent='map '+id+' '+cur.w+'x'+cur.h+' | chipset '+cur.chipset+' ('+(cs?cs.file:'?')+') | event '+cur.events.length;
+}
+(async()=>{
+ db=await J('data/database.json');idx=await J('data/assets.json');meta=await J('data/maps.json');
+ for(const id of Object.keys(meta).sort((a,b)=>a-b)){const o=document.createElement('option');o.value=id;o.textContent='Map '+id;$('sel').appendChild(o);}
+ $('sel').onchange=()=>load($('sel').value);
+ $('z').onclick=()=>{S=S==2?1:S==1?3:2;$('z').textContent='x'+S;if(cur)draw();};
+ $('ev').onchange=()=>cur&&draw();
+ $('c').onclick=e=>{if(!cur)return;const r=$('c').getBoundingClientRect(),x=(e.clientX-r.left)/S/16|0,y=(e.clientY-r.top)/S/16|0;
+  $('info').textContent='('+x+','+y+') lower='+cur.lower[y*cur.w+x]+' upper='+cur.upper[y*cur.w+x];};
+ load($('sel').value=Object.keys(meta).sort((a,b)=>a-b)[0]);
+})();
+</script>
